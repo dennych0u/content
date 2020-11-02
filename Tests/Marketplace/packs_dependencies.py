@@ -42,29 +42,40 @@ def main():
 
     logging.info("Starting dependencies calculation")
     # starting iteration over pack folders
+    packs = []
     for pack in os.scandir(PACKS_FULL_PATH):
         if not pack.is_dir() or pack.name in IGNORED_FILES:
             logging.warning(f"Skipping dependency calculation of {pack.name} pack.")
             continue  # skipping ignored packs
-        logging.info(f"Calculating {pack.name} pack dependencies.")
+        packs.append(pack.name)
 
+    logging.info(f"Calculating pack dependencies.")
+    try:
+        dependency_graph = PackDependencies.build_all_dependencies_graph(packs,
+                                                                         id_set=id_set,
+                                                                         verbose_file=VerboseFile(''))
+    except Exception:
+        logging.exception(f"Failed calculating dependencies graph")
+        exit(2)
+
+    for pack in dependency_graph:
         try:
-            dependency_graph = PackDependencies.build_dependency_graph(pack_id=pack.name,
-                                                                       id_set=id_set,
-                                                                       verbose_file=VerboseFile(''),
-                                                                       )
-            first_level_dependencies, all_level_dependencies = parse_for_pack_metadata(dependency_graph, pack.name)
-
+            logging.info(f"Calculating {pack.name} pack dependencies.")
+            subgraph = PackDependencies.get_dependencies_subgraph_by_dfs(dependency_graph, pack)
+            for dependency_pack, additional_data in subgraph.nodes(data=True):
+                additional_data['mandatory'] = pack in additional_data['mandatory_for']
+                del additional_data['mandatory_for']
+                first_level_dependencies, all_level_dependencies = parse_for_pack_metadata(subgraph, pack)
         except Exception:
-            logging.exception(f"Failed calculating {pack.name} pack dependencies")
+            logging.exception(f"Failed calculating {pack} pack dependencies")
             continue
 
-        pack_dependencies_result[pack.name] = {
+        pack_dependencies_result[pack] = {
             "dependencies": first_level_dependencies,
             "displayedImages": list(first_level_dependencies.keys()),
             "allLevelDependencies": all_level_dependencies,
-            "path": os.path.join(PACKS_FOLDER, pack.name),
-            "fullPath": pack.path
+            "path": os.path.join(PACKS_FOLDER, pack),
+            "fullPath": os.path.abspath(os.path.join(PACKS_FOLDER, pack))
         }
 
     logging.info(f"Number of created pack dependencies entries: {len(pack_dependencies_result.keys())}")
